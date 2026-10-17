@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.database import async_session
 from app.models import Permit, PermitRequest, PermitStatus
 from app.services import (
     template_filler,
@@ -38,41 +39,45 @@ async def create_permits(db: AsyncSession, request: PermitRequest, permit_types:
     return permits
 
 
-async def fill_and_send_template(db: AsyncSession, permit: Permit, request: PermitRequest):
-    data = {
-        "permit_id": permit.id,
-        "requester_name": request.requester_name,
-        "requester_email": request.requester_email,
-        "project_name": request.project_name,
-        "project_location": request.project_location,
-        "permit_type": permit.permit_type,
-    }
+async def fill_and_send_template(permit_id: int, request_id: int):
+    async with async_session() as db:
+        permit = await db.get(Permit, permit_id)
+        request = await db.get(PermitRequest, request_id)
 
-    filled_path = await template_filler.fill_template(permit.permit_type, data)
-    permit.template_file = str(filled_path)
+        data = {
+            "permit_id": permit.id,
+            "requester_name": request.requester_name,
+            "requester_email": request.requester_email,
+            "project_name": request.project_name,
+            "project_location": request.project_location,
+            "permit_type": permit.permit_type,
+        }
 
-    upload_link = f"{settings.app_base_url}/permits/{permit.id}/upload"
+        filled_path = await template_filler.fill_template(permit.permit_type, data)
+        permit.template_file = str(filled_path)
 
-    body = f"""
-    <h2>Permit Application - {permit.permit_type}</h2>
-    <p>Hello {request.requester_name},</p>
-    <p>Please find the attached permit template for <strong>{permit.permit_type}</strong>.</p>
-    <p>Fill in all required fields and upload the completed file here:</p>
-    <p><a href="{upload_link}">{upload_link}</a></p>
-    <p>Thank you.</p>
-    """
+        upload_link = f"{settings.app_base_url}/permits/{permit.id}/upload"
 
-    await graph_mail.send_permit_email(
-        to_email=request.requester_email,
-        to_name=request.requester_name,
-        subject=f"Permit Template: {permit.permit_type} - {request.project_name}",
-        body_html=body,
-        attachment_path=filled_path,
-    )
+        body = f"""
+        <h2>Permit Application - {permit.permit_type}</h2>
+        <p>Hello {request.requester_name},</p>
+        <p>Please find the attached permit template for <strong>{permit.permit_type}</strong>.</p>
+        <p>Fill in all required fields and upload the completed file here:</p>
+        <p><a href="{upload_link}">{upload_link}</a></p>
+        <p>Thank you.</p>
+        """
 
-    permit.status = PermitStatus.TEMPLATE_SENT
-    await db.commit()
-    logger.info("Template sent for permit %d", permit.id)
+        await graph_mail.send_permit_email(
+            to_email=request.requester_email,
+            to_name=request.requester_name,
+            subject=f"Permit Template: {permit.permit_type} - {request.project_name}",
+            body_html=body,
+            attachment_path=filled_path,
+        )
+
+        permit.status = PermitStatus.TEMPLATE_SENT
+        await db.commit()
+        logger.info("Template sent for permit %d", permit.id)
 
 
 async def process_upload(db: AsyncSession, permit: Permit, uploaded_path: Path):

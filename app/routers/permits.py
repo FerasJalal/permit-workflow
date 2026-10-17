@@ -38,7 +38,7 @@ async def create_permit_request(
     permits = await workflow.create_permits(db, request, permit_dicts)
 
     for permit in permits:
-        background_tasks.add_task(workflow.fill_and_send_template, db, permit, request)
+        background_tasks.add_task(workflow.fill_and_send_template, permit.id, request.id)
 
     await db.refresh(request, attribute_names=["permits"])
     return request
