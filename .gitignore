@@ -6,3 +6,4 @@ uploads/
 generated/
 *.pdf
 .venv/
+uvicorn_*.txt
